@@ -39,9 +39,6 @@ which is regenerated on each run and not tracked by git. Only base R is used.
 - Run everything from the repository root; relative paths only.
 - `set.seed()` at the top of every script that draws random numbers.
 - Bootstrap loops vectorised where possible (one column per bootstrap sample).
-- Durations are in hours in the data and in minutes in tables; the working-hour clock
+- Durations are in hours in the data and in minutes in tables, the working-hour clock
   ignores time outside 8:00 to 17:00, so a working day is 9 hours.
 - Results are saved as `.rds`, figures as PDF.
-- One branch per task, small pull requests reviewed by your pair partner.
-
-## Who did what
