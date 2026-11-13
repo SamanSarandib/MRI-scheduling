@@ -31,8 +31,6 @@ which is regenerated on each run and not tracked by git. Only base R is used.
 | `R/40_des_engine.R` | `generate_calls()`, `book_call()`, `run_day()`, `simulate()` | to do |
 | `R/41_des_experiments.R` | slot grid, policy comparison, input-uncertainty loop | to do |
 | `R/50_report_outputs.R` | tables and figures for the report | to do |
-| `tests/test_des.R` | deterministic cases and sanity checks | to do |
-| `report/` | source of the 10-page report | to do |
 
 ## Conventions
 
