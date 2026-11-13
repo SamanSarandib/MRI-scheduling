@@ -25,9 +25,9 @@ which is regenerated on each run and not tracked by git. Only base R is used.
 | `R/00_load_clean.R` | dates, minutes, working-hour clock, interarrivals, daily aggregates, checks | done |
 | `R/01_eda.R` | summary table and figures for the data section | done |
 | `R/10_type1.R` | normal/Poisson estimates, parametric and nonparametric bootstrap | done |
-| `R/11_type2.R` | plug-in estimates, iid and smoothed bootstrap, ML fits via `optim` | to do |
-| `R/20_boot_functions.R` | percentile, percentile-t, parametric, smoothed interval functions | to do |
-| `R/30_mc_study.R` | the Monte Carlo design, parallelised | to do |
+| `R/11_type2.R` | plug-in estimates, iid, smoothed and parametric bootstraps, ML fits of four models, KS fit tests | done |
+| `R/20_boot_functions.R` | percentile, percentile-t, parametric, smoothed interval functions | done |
+| `R/30_mc_study.R` | Monte Carlo coverage study of the intervals in 10 and 11, parallelised | done |
 | `R/40_des_engine.R` | `generate_calls()`, `book_call()`, `run_day()`, `simulate()` | to do |
 | `R/41_des_experiments.R` | slot grid, policy comparison, input-uncertainty loop | to do |
 | `R/50_report_outputs.R` | tables and figures for the report | to do |
