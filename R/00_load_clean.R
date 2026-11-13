@@ -10,6 +10,7 @@ scans$type <- ifelse(scans$PatientType == "Type 1", 1L, 2L)
 scans$dur_min <- 60 * scans$Duration                    # minutes for reporting, hours kept for computing
 scans <- scans[order(scans$Date, scans$Time), ]
 
+
 # Checks on load: no missing values, calls within 8:00-17:00, positive durations,
 # and every weekday between the first and last date present (no weekends, no gaps), 21 in all.
 days <- sort(unique(scans$Date))
@@ -17,7 +18,8 @@ all_days <- seq(min(days), max(days), by = "day")
 weekdays_only <- all_days[format(all_days, "%u") <= "5"]
 stopifnot(!anyNA(scans), all(scans$PatientType %in% c("Type 1", "Type 2")),
           all(scans$Time >= 8 & scans$Time <= 17), all(scans$Duration > 0),
-          identical(days, weekdays_only), length(days) == 21)
+          length(days) == length(weekdays_only) && all(days == weekdays_only),
+          length(days) == 21)
 
 # Working-hour clock: time outside 8:00-17:00 does not count, so a day is 9 hours long.
 scans$day <- match(scans$Date, days)                    # working-day index 1, ..., 21
