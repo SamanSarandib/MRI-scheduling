@@ -29,7 +29,8 @@ cols <- c("grey40", "steelblue4")
 
 # Figure 1: calls per working day.
 pdf("output/fig01_calls_per_day.pdf", width = 7, height = 4)
-matplot(daily[c("calls1", "calls2")], type = "o", pch = 16, lty = 1, col = cols, ylim = c(0, 25),
+matplot(daily[c("calls1", "calls2")], type = "o", pch = 16, lty = 1, col = cols,
+        ylim = c(0, max(25, daily$calls1, daily$calls2)),
         xaxt = "n", xlab = "Working day in August 2025 (day of the month)", ylab = "Calls per day")
 axis(1, at = seq_len(nrow(daily)), labels = format(daily$date, "%d"), cex.axis = 0.8, gap.axis = 0)
 abline(h = colMeans(daily[c("calls1", "calls2")]), col = cols, lty = 2)
@@ -41,7 +42,7 @@ pdf("output/fig02_durations.pdf", width = 7, height = 7)
 par(mfrow = c(2, 1), mar = c(4, 4, 2, 1))
 for (k in 1:2) {
   D <- scans$dur_min[scans$type == k]; m <- mean(D); s <- sd(D)
-  h <- hist(D, breaks = seq(0, 90, 5), plot = FALSE)
+  h <- hist(D, breaks = seq(0, max(90, 5 * ceiling(max(D) / 5)), 5), plot = FALSE)   # 0-90, wider if needed
   plot(h, ylim = c(0, 1.1 * max(h$counts, 5 * length(D) * dnorm(m, m, s))), col = cols[k], border = "white",
        main = paste0("Type ", k, ": ", length(D), " scans"), xlab = "Scan duration (minutes)", ylab = "Scans per bin")
   curve(5 * length(D) * dnorm(x, m, s), add = TRUE, lwd = 2)
@@ -62,7 +63,8 @@ for (k in 1:2) {
   curve(dexp(x, 1 / mean(G)), add = TRUE, lwd = 2)
 }
 for (k in 1:2) {
-  barplot(table(factor(floor(scans$Time[scans$type == k]), levels = 8:16)) / nrow(daily), col = cols[k],
+  # a call at 17:00 exactly (allowed by the check in 00) counts in the last hour, 16:00-17:00
+  barplot(table(factor(pmin(floor(scans$Time[scans$type == k]), 16), levels = 8:16)) / nrow(daily), col = cols[k],
           border = "white", main = sprintf("Type %d: calls per hour of the day", k), xlab = "Hour", ylab = "Calls per day")
 }
 invisible(dev.off())
