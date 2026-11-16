@@ -40,3 +40,7 @@ which is regenerated on each run and not tracked by git. Only base R is used.
 - Durations are in hours in the data and in minutes in tables, the working-hour clock
   ignores time outside 8:00 to 17:00, so a working day is 9 hours.
 - Results are saved as `.rds`, figures as PDF.
+- `p_work9` is the chance that one day's scans take more than 9 hours, from the daily number of
+  calls and the scan durations combined: under the Poisson and normal model for Type 1, from the
+  observed counts and durations for Type 2. `share_days_<event>` is the share of the 21 observed
+  days with that event, with an exact binomial interval.
