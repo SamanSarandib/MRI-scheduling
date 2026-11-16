@@ -144,7 +144,14 @@ mc_type1_one <- function() {
 # ---- Run --------------------------------------------------------------------------------------
 cl <- makeCluster(4)                     # one worker per truth
 clusterSetRNGStream(cl, 2026)            # independent random-number streams
-clusterExport(cl, ls())                  # the functions and settings above, and those of 20_boot_functions.R
+# Each worker gets only what it uses: the functions of 20_boot_functions.R, sourced there, and
+# the settings, truths and functions above. Not the whole workspace, which under run_all.R holds
+# every result of 10 and 11, so the study runs the same on its own as from run_all.R.
+invisible(clusterCall(cl, source, "R/20_boot_functions.R"))
+clusterExport(cl, c("n_sim", "B", "alpha", "n_grid", "probs", "slots", "q_names", "p_names", "targets", "methods", "rows",
+                    "m", "s", "sl", "kw", "truths", "truth_values", "col_quantiles", "edf_stats", "normal_stats",
+                    "gamma_stats", "mc_one", "evaluate", "run_truth",
+                    "mu1", "s1", "lam1", "slots1", "n1", "work9", "t1_stats", "truth1", "mc_type1_one"))
 tab30 <- do.call(rbind, parLapply(cl, names(truths), run_truth))
 clusterSetRNGStream(cl, 2028)            # Type 1 results do not depend on the settings of the Type 2 part
 a1 <- parLapply(cl, lengths(splitIndices(n_sim, 4)), function(r) replicate(r, mc_type1_one()))
