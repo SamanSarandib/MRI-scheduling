@@ -57,14 +57,22 @@ dur_stats <- function(X) {
 # 20_boot_functions.R and the Weibull weibull_ml below (kept here, not in the shared file 20).
 # The normal is included only in the fit test, as the Type 1 assumption.
 # Weibull ML: the shape k solves 1/k + mean(log x) - sum(x^k log x) / sum(x^k) = 0 (Newton from
-# the usual CV-based start), then scale = mean(x^k)^(1/k); it matches MASS::fitdistr.
-weibull_ml <- function(X) {
+# the usual CV-based start), then scale = mean(x^k)^(1/k); it matches MASS::fitdistr. Newton
+# stops once every column's step is below `tol` times its shape; a step that would make the
+# shape negative is replaced by halving it, and a column that has not converged after
+# `max_iter` steps stops the script with an error rather than giving a wrong fit.
+weibull_ml <- function(X, tol = 1e-10, max_iter = 50) {
   X <- as.matrix(X); L <- log(X); mL <- colMeans(L)
   k <- (col_sd(X) / colMeans(X))^-1.086
-  for (i in 1:20) {
+  for (i in seq_len(max_iter)) {
     Xk <- X^rep(k, each = nrow(X)); S0 <- colSums(Xk); S1 <- colSums(Xk * L); S2 <- colSums(Xk * L^2)
-    k <- k - (1 / k + mL - S1 / S0) / (-1 / k^2 - (S2 / S0 - (S1 / S0)^2))
+    step <- (1 / k + mL - S1 / S0) / (-1 / k^2 - (S2 / S0 - (S1 / S0)^2))
+    k <- ifelse(k - step > 0, k - step, k / 2)
+    if (isTRUE(all(abs(step) < tol * k))) break
   }
+  ok <- is.finite(k) & is.finite(step) & abs(step) < tol * k
+  if (!all(ok)) stop(sprintf("weibull_ml: no convergence after %d Newton steps for %d of %d samples",
+                             max_iter, sum(!ok), length(k)))
   rbind(shape = k, scale = colMeans(X^rep(k, each = nrow(X)))^(1 / k))
 }
 models <- list(
