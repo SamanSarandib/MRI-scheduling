@@ -1,5 +1,6 @@
 # 20_boot_functions.R
-# Bootstrap tools shared by 10_type1.R, 11_type2.R and 30_mc_study.R. Functions only:
+# Bootstrap tools shared by 10_type1.R, 11_type2.R and 30_mc_study.R, and p_day_over() (the
+# chance that a day's scans take more than 9 hours) shared by 10 and 11. Functions only:
 # sourcing this file runs nothing. Bootstrap samples are matrices with one sample per
 # column, so statistics are computed for all B samples at once. Notation as in Boot.R:
 # Q* is the bootstrap quantity and c*_a its (1 - a)-quantile.
@@ -62,4 +63,19 @@ boot_table <- function(th, star, alpha = 0.05, efron = character()) {
            ci_efron(star[q, ], alpha))
   }))
   data.frame(estimate = th[qs], lower = ci[, 1], upper = ci[, 2], interval = type, row.names = qs)
+}
+
+# P(one day's scans take more than `limit` minutes) when the number of calls that day is drawn
+# from the observed daily counts N and every scan from the observed durations D (minutes), all
+# independently: p_work9 of 10_type1.R with the observed distributions in place of the Poisson
+# and the normal. Exact for those distributions: the durations go on a grid of `step` minutes
+# (a sum of 11 scans moves by at most 0.3 minutes) and the sum of k scans is the k-fold
+# convolution of the duration distribution, computed by FFT.
+p_day_over <- function(D, N, limit = 540, step = 0.05) {
+  i <- round(D / step)                                  # grid index of every scan, 0 = 0 minutes
+  L <- 2^ceiling(log2(max(N) * max(i) + 1))             # FFT length: room for the longest possible day
+  f <- fft(tabulate(i + 1, L) / length(D))              # transform of the duration distribution
+  over <- (seq_len(L) - 1) * step > limit
+  nk <- table(N); k <- as.integer(names(nk))
+  sum(nk / length(N) * sapply(k, function(j) sum(Re(fft(f^j, inverse = TRUE))[over]) / L))
 }

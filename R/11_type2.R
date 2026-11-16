@@ -6,11 +6,13 @@
 #   - smoothed:       resample and add N(0, h^2) noise (boot_smooth), centred on the KDE
 #   - parametric:     for each candidate model (exponential, gamma, Weibull, lognormal),
 #                     simulate from its ML fit and refit every sample (boot_param)
-# Arrivals (calls and scan-hours per day, gaps between calls) get the non-parametric bootstrap.
+# Arrivals (calls and scan-hours per day, gaps between calls) get the non-parametric bootstrap,
+# and shares of the 21 observed days an exact binomial interval.
 # A parametric-bootstrap KS test checks which of these models (and the normal) fits, both for the
 # durations and for the time between calls; the gaps also get a non-parametric and a parametric
 # bootstrap per model.
-# Names follow 10_type1.R (lambda, lambda_gaps, hours, p_work9, p_over_<slot>).
+# Names follow 10_type1.R (lambda, lambda_gaps, hours, p_work9, p_over_<slot>); share_days_<event>
+# is the share of the 21 observed days with that event.
 # The main table (tab11_type2_main.csv) holds the interval to report for each duration quantity:
 # the smoothed one for q90 and q95, which the plain EDF interval under-covers (30_mc_study.R).
 # Output: output/tab11_type2_{main,durations,arrivals,gaps,gof,gof_gaps}.csv, output/fig12_type2_bootstrap.pdf,
@@ -112,7 +114,8 @@ th <- dur_stats(D)[, 1]
 # 1. Non-parametric bootstrap: percentile-t for the mean, percentile for sd and quantiles,
 #    Efron's percentile for the tail probabilities (skewed, bounded by 0 and 1). For q90 and
 #    q95 the main table below reports the smoothed interval of 2. instead.
-star_np <- dur_stats(boot_iid(D, B))
+Dstar   <- boot_iid(D, B)                 # kept: the 9-hour risk of the arrivals reuses them
+star_np <- dur_stats(Dstar)
 tab_np  <- boot_table(th, star_np, alpha, efron = p_names)
 
 # 2. Smoothed bootstrap. Its samples come from the EDF convolved with N(0, h^2), whose sd,
@@ -174,24 +177,42 @@ tab_gof    <- t(sapply(all_models, ks_model, x = D))
 # Days are resampled whole, so a day's calls and scan-hours stay together; gaps are resampled
 # on their own (as in 10_type1.R). Names as in Type 1: lambda = calls per day, lambda_gaps =
 # calls per day from the gaps (9 / mean gap), hours = scan-hours per day, p_work9 = P(a day's
-# Type 2 scans take more than 9 h). Without a model these are plug-in: p_work9 is the share of
-# such days. dispersion (variance / mean) is 1 for Poisson counts, gap_cv 1 for exponential
-# gaps. p_calls_over_<cap>: the chance a day has more calls than one machine has 45- or 60-minute slots.
+# Type 2 scans take more than 9 h). dispersion (variance / mean) is 1 for Poisson counts,
+# gap_cv 1 for exponential gaps.
+# p_work9 means what it means for Type 1: a day's number of calls and its scan durations
+# combined (p_day_over() in 20_boot_functions.R), here with the observed daily counts and
+# durations in place of the Poisson and the normal. Its bootstrap pairs every resample of the
+# days with a resample of the durations (Dstar above), with Efron's interval as in 10.
 day_stats <- function(I) {
   I <- as.matrix(I); Nm <- matrix(N[I], nrow(I)); Hm <- matrix(H[I], nrow(I))
   sN <- col_sd(Nm); sH <- col_sd(Hm)
-  out <- rbind(colMeans(Nm), sN^2 / colMeans(Nm), rows(lapply(cap, function(c) colMeans(Nm > c))),
-               colMeans(Hm), colMeans(Hm > 9), sN / sqrt(nrow(I)), sH / sqrt(nrow(I)))
-  rownames(out) <- c("lambda", "dispersion", paste0("p_calls_over_", cap), "hours", "p_work9", "se.lambda", "se.hours")
+  out <- rbind(colMeans(Nm), sN^2 / colMeans(Nm), colMeans(Hm), sN / sqrt(nrow(I)), sH / sqrt(nrow(I)))
+  rownames(out) <- c("lambda", "dispersion", "hours", "se.lambda", "se.hours")
   out
 }
 gap_stats <- function(X) {
   X <- as.matrix(X); m <- colMeans(X); cv <- col_sd(X) / m
   rbind(lambda_gaps = 9 / m, gap_cv = cv, se.lambda_gaps = 9 / m * cv / sqrt(nrow(X)))   # delta method
 }
-th_arr   <- c(day_stats(seq_len(nd))[, 1], gap_stats(G)[, 1])
-star_arr <- rbind(day_stats(boot_iid(seq_len(nd), B)), gap_stats(boot_iid(G, B)))
-tab_arr  <- boot_table(th_arr, star_arr, alpha, efron = c(paste0("p_calls_over_", cap), "p_work9"))
+Istar    <- boot_iid(seq_len(nd), B)       # B resamples of the 21 days, one per column
+th_arr   <- c(day_stats(seq_len(nd))[, 1], p_work9 = p_day_over(D, N), gap_stats(G)[, 1])
+star_arr <- rbind(day_stats(Istar),
+                  p_work9 = sapply(seq_len(B), function(b) p_day_over(Dstar[, b], N[Istar[, b]])),
+                  gap_stats(boot_iid(G, B)))
+tab_arr  <- boot_table(th_arr, star_arr, alpha, efron = "p_work9")
+
+# Shares of the 21 observed days with an event, named share_days_<event>: more calls than one
+# machine has 45- or 60-minute slots (12 and 9), and more than 9 scan-hours. The days are
+# independent trials, so the interval is the exact (Clopper-Pearson) binomial one. A bootstrap
+# of the days cannot do this: when no day had the event it gives the interval [0, 0], which
+# reads as no risk with certainty, while 0 days out of 21 still allows a chance of up to 16%.
+day_events <- c(setNames(lapply(cap, function(c) N > c), paste0("share_days_calls_over_", cap)),
+                list(share_days_work9 = H > 9))
+tab_days <- do.call(rbind, lapply(names(day_events), function(e) {
+  x <- sum(day_events[[e]]); ci <- binom.test(x, nd, conf.level = 1 - alpha)$conf.int
+  data.frame(estimate = x / nd, lower = ci[1], upper = ci[2], interval = "exact binomial", row.names = e)
+}))
+tab_arr <- rbind(tab_arr, tab_days)
 
 # Time between calls: the same four models as for the durations, fitted by ML to the gaps in
 # working minutes, with the KS test (figures 15 and 16 show the fit). Exponential gaps mean
