@@ -190,7 +190,10 @@ tab_gof    <- t(sapply(all_models, ks_model, x = D))
 # p_work9 means what it means for Type 1: a day's number of calls and its scan durations
 # combined (p_day_over() in 20_boot_functions.R), here with the observed daily counts and
 # durations in place of the Poisson and the normal. Its bootstrap pairs every resample of the
-# days with a resample of the durations (Dstar above), with Efron's interval as in 10.
+# days with a resample of the durations (Dstar above). Its bootstrap distribution is skewed
+# and not centred on the estimate, so it gets the bias-corrected percentile interval: in
+# simulations with gamma, lognormal and Weibull durations Efron's interval (as in 10) put the
+# true risk above its upper limit 5-7% of the time instead of 2.5%.
 day_stats <- function(I) {
   I <- as.matrix(I); Nm <- matrix(N[I], nrow(I)); Hm <- matrix(H[I], nrow(I))
   sN <- col_sd(Nm); sH <- col_sd(Hm)
@@ -207,7 +210,7 @@ th_arr   <- c(day_stats(seq_len(nd))[, 1], p_work9 = p_day_over(D, N), gap_stats
 star_arr <- rbind(day_stats(Istar),
                   p_work9 = sapply(seq_len(B), function(b) p_day_over(Dstar[, b], N[Istar[, b]])),
                   gap_stats(boot_iid(G, B)))
-tab_arr  <- boot_table(th_arr, star_arr, alpha, efron = "p_work9")
+tab_arr  <- boot_table(th_arr, star_arr, alpha, bc = "p_work9")
 
 # Shares of the 21 observed days with an event, named share_days_<event>: more calls than one
 # machine has 45- or 60-minute slots (12 and 9), and more than 9 scan-hours. The days are

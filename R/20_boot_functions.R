@@ -40,6 +40,9 @@ lower_upper <- function(M) { colnames(M) <- c("lower", "upper"); M }
 # estimates). Percentile: Q* = theta* - theta, centred on `center`, the value of the
 # statistic in the bootstrap world (the estimate itself, except for the smoothed bootstrap).
 # Percentile-t: Q* = (theta* - theta) / se*. Efron: the quantiles of theta* themselves.
+# Bias-corrected (Efron's BC): the quantiles of theta* at Phi(2 z0 -/+ z_{1 - alpha/2}), where
+# z0 = Phi^{-1}(share of theta* below the estimate) corrects for a bootstrap distribution
+# that is not centred on the estimate (z0 = 0 gives Efron's interval).
 ci_percentile   <- function(est, star, alpha = 0.05, center = est) lower_upper(est - cuts(star - center, alpha))
 ci_percentile_t <- function(est, se, star, se_star, alpha = 0.05) {
   Q <- (star - est) / se_star
@@ -47,19 +50,25 @@ ci_percentile_t <- function(est, se, star, se_star, alpha = 0.05) {
   lower_upper(est - cuts(Q, alpha) * se)
 }
 ci_efron        <- function(star, alpha = 0.05) lower_upper(cuts(star, alpha)[, 2:1, drop = FALSE])
+ci_bc           <- function(est, star, alpha = 0.05) {
+  z0 <- qnorm(mean(star < est))
+  lower_upper(rbind(quantile(star, pnorm(2 * z0 + qnorm(c(alpha / 2, 1 - alpha / 2))), type = 6, names = FALSE)))
+}
 
 # Table of estimates and intervals. `th` holds the estimates plus "se.<name>" for every
 # quantity that gets a percentile-t interval; `star` has the same rows, one column per
 # bootstrap sample. Quantities in `efron` (skewed tail probabilities) get Efron's interval,
-# all others the percentile interval of the plan.
-boot_table <- function(th, star, alpha = 0.05, efron = character()) {
+# those in `bc` the bias-corrected one, all others the percentile interval of the plan.
+boot_table <- function(th, star, alpha = 0.05, efron = character(), bc = character()) {
   qs <- names(th)[!startsWith(names(th), "se.")]
-  type <- ifelse(paste0("se.", qs) %in% names(th), "percentile-t", ifelse(qs %in% efron, "Efron percentile", "percentile"))
+  type <- ifelse(paste0("se.", qs) %in% names(th), "percentile-t",
+                 ifelse(qs %in% efron, "Efron percentile", ifelse(qs %in% bc, "bias-corrected percentile", "percentile")))
   ci <- t(sapply(seq_along(qs), function(i) {
     q <- qs[i]; se <- paste0("se.", q)
     switch(type[i],
            "percentile-t" = ci_percentile_t(th[[q]], th[[se]], star[q, ], star[se, ], alpha),
            "percentile"   = ci_percentile(th[[q]], star[q, ], alpha),
+           "bias-corrected percentile" = ci_bc(th[[q]], star[q, ], alpha),
            ci_efron(star[q, ], alpha))
   }))
   data.frame(estimate = th[qs], lower = ci[, 1], upper = ci[, 2], interval = type, row.names = qs)
