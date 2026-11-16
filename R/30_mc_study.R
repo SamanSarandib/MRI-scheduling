@@ -4,11 +4,11 @@
 # simulate, apply, evaluate, summarise, as in BootstrapCode.R. The methods are the interval
 # rules of 10_type1.R and 11_type2.R, built with the same boot_table() calls:
 #   Type 2 durations, four invented truths with the Type 2 mean and sd, n = 50 to 500:
-#     M1 EDF, percentile          what 11 uses for q90 and q95
+#     M1 EDF, percentile          11's plain interval for q90 and q95 (under-covers: 84-88% at n = 209)
 #     M2 EDF, percentile-t        what 11 uses for the mean; the plan's rule for the shares
 #     M3 normal fit               the Type 1 recipe of 10 applied to Type 2 (the naive analyst)
 #     M4 gamma fit                as in 11, with Efron's interval for the shares
-#     M5 smoothed bootstrap       as in 11, for the quantiles
+#     M5 smoothed bootstrap       what 11 reports for q90 and q95 (its main table)
 #     M6 EDF, Efron percentile    what 11 uses for the shares
 #   Type 1: every quantity of 10 when its own model is the truth, at its sample sizes.
 #   Type 2 arrivals: the mean daily count from 21 days, resampling days (as 11) or assuming

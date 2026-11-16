@@ -11,7 +11,9 @@
 # durations and for the time between calls; the gaps also get a non-parametric and a parametric
 # bootstrap per model.
 # Names follow 10_type1.R (lambda, lambda_gaps, hours, p_work9, p_over_<slot>).
-# Output: output/tab11_type2_{durations,arrivals,gaps,gof,gof_gaps}.csv, output/fig12_type2_bootstrap.pdf,
+# The main table (tab11_type2_main.csv) holds the interval to report for each duration quantity:
+# the smoothed one for q90 and q95, which the plain EDF interval under-covers (30_mc_study.R).
+# Output: output/tab11_type2_{main,durations,arrivals,gaps,gof,gof_gaps}.csv, output/fig12_type2_bootstrap.pdf,
 # fig13-14 (durations) and fig15-16 (time between calls): histograms and QQ plots of the fitted
 # models, as fig11 for Type 1; figures are also drawn in RStudio's Plots pane.
 # output/type2.rds, and `type2_inputs` (generators in minutes) for the simulation in Part 2.
@@ -108,7 +110,8 @@ model_stats <- function(M, par) {
 th <- dur_stats(D)[, 1]
 
 # 1. Non-parametric bootstrap: percentile-t for the mean, percentile for sd and quantiles,
-#    Efron's percentile for the tail probabilities (skewed, bounded by 0 and 1).
+#    Efron's percentile for the tail probabilities (skewed, bounded by 0 and 1). For q90 and
+#    q95 the main table below reports the smoothed interval of 2. instead.
 star_np <- dur_stats(boot_iid(D, B))
 tab_np  <- boot_table(th, star_np, alpha, efron = p_names)
 
@@ -142,6 +145,16 @@ tab_dur <- do.call(rbind, c(list(long(tab_np, "non-parametric"), long(tab_sm, "s
                             lapply(names(tab_mod), function(m) long(tab_mod[[m]], m))))
 tab_dur <- tab_dur[order(match(tab_dur$quantity, rownames(tab_np))), ]
 rownames(tab_dur) <- NULL
+
+# Main table: the interval to report for each quantity. For q90 and q95 that is the smoothed
+# bootstrap. An EDF quantile is one order statistic, so its plain bootstrap distribution is
+# lumpy and too narrow: in 30_mc_study.R the plain percentile interval covers only 84-88% at
+# n = 209, and its upper limit falls below the true quantile 6-11% of the time instead of 2.5%,
+# which understates the slot length. The smoothed interval covers 92-96%. The estimate stays
+# the EDF quantile; the other quantities keep their non-parametric intervals.
+tab_main <- tab_np
+tab_main[q_names, ] <- tab_sm[q_names, ]
+tab_main$method <- ifelse(rownames(tab_main) %in% q_names, "smoothed", "non-parametric")
 
 # ---- Goodness of fit: KS distance to each fitted model ------------------------------------
 # The parameters are estimated, so the standard KS p-value is wrong (too large); the null
@@ -238,7 +251,8 @@ round_df <- function(d) { num <- sapply(d, is.numeric); d[num] <- lapply(d[num],
 cat(sprintf("Type 2: %d scans, %.1f calls per day; bandwidth h = %.2f min.\n", n, mean(N), h))
 cat("\nML fits of the duration models:\n"); for (m in names(fits)) cat(sprintf("  %-12s %s\n", m,
                                                                                paste(sprintf("%s = %.3f", rownames(fits[[m]]), fits[[m]][, 1]), collapse = ", ")))
-cat("\nScan durations (minutes; p_over = share of scans longer than the slot):\n"); print(round_df(tab_dur))
+cat("\nScan durations, main table (minutes; smoothed intervals for q90 and q95):\n"); print(round_df(tab_main))
+cat("\nScan durations, every method (minutes; p_over = share of scans longer than the slot):\n"); print(round_df(tab_dur))
 cat("\nGoodness of fit of the durations (parametric-bootstrap KS test):\n"); print(round(tab_gof, 3))
 cat("\nTime between calls (working minutes): ML fits and KS test:\n")
 for (m in names(gap_fits)) cat(sprintf("  %-12s %s\n", m,
@@ -248,6 +262,7 @@ cat("\nTime between calls: mean gap (working minutes), CV and calls per day, per
 cat("\nArrivals (per working day; lambda_gaps from the gaps between calls):\n"); print(round_df(tab_arr))
 cat("\nBusy-day range (calls per day):\n"); print(busy)
 cat("\nDiagnostics:\n"); print(round(diagnostics, 3))
+write.csv(round_df(tab_main), "output/tab11_type2_main.csv")
 write.csv(round_df(tab_dur), "output/tab11_type2_durations.csv", row.names = FALSE)
 write.csv(round_df(tab_arr), "output/tab11_type2_arrivals.csv")
 write.csv(round(tab_gof, 3), "output/tab11_type2_gof.csv")
@@ -337,7 +352,7 @@ type2_inputs <- local({
              paste0("gap2_", names(ms))))
 })
 
-saveRDS(list(estimates = th, durations = tab_dur, arrivals = tab_arr, gof = tab_gof, gof_gaps = tab_gof_gaps,
+saveRDS(list(estimates = th, main = tab_main, durations = tab_dur, arrivals = tab_arr, gof = tab_gof, gof_gaps = tab_gof_gaps,
              gap_fits = lapply(gap_fits, function(p) p[, 1]), gaps = tab_gaps,
              gap_par_star = lapply(gap_par_star, t), busy_day = busy,
              diagnostics = diagnostics, np_star = star_np, sm_star = star_sm, arr_star = star_arr,
