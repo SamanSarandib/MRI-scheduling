@@ -52,63 +52,8 @@ dur_stats <- function(X) {
   rownames(out) <- c("mean", "se.mean", "sd", q_names, p_names, paste0("se.", p_names))
   out
 }
-# Candidate models for the durations. Each has an ML fit for every column of a matrix (one
-# parameter column per sample), a random generator, quantile and survival functions, and its
-# mean and sd. Exponential and lognormal ML are closed form, the gamma uses gamma_ml from
-# 20_boot_functions.R and the Weibull weibull_ml below (kept here, not in the shared file 20).
-# The normal is included only in the fit test, as the Type 1 assumption.
-# Weibull ML: the shape k solves 1/k + mean(log x) - sum(x^k log x) / sum(x^k) = 0 (Newton from
-# the usual CV-based start), then scale = mean(x^k)^(1/k); it matches MASS::fitdistr. Newton
-# stops once every column's step is below `tol` times its shape; a step that would make the
-# shape negative is replaced by halving it, and a column that has not converged after
-# `max_iter` steps stops the script with an error rather than giving a wrong fit.
-weibull_ml <- function(X, tol = 1e-10, max_iter = 50) {
-  X <- as.matrix(X); L <- log(X); mL <- colMeans(L)
-  k <- (col_sd(X) / colMeans(X))^-1.086
-  for (i in seq_len(max_iter)) {
-    Xk <- X^rep(k, each = nrow(X)); S0 <- colSums(Xk); S1 <- colSums(Xk * L); S2 <- colSums(Xk * L^2)
-    step <- (1 / k + mL - S1 / S0) / (-1 / k^2 - (S2 / S0 - (S1 / S0)^2))
-    k <- ifelse(k - step > 0, k - step, k / 2)
-    if (isTRUE(all(abs(step) < tol * k))) break
-  }
-  ok <- is.finite(k) & is.finite(step) & abs(step) < tol * k
-  if (!all(ok)) stop(sprintf("weibull_ml: no convergence after %d Newton steps for %d of %d samples",
-                             max_iter, sum(!ok), length(k)))
-  rbind(shape = k, scale = colMeans(X^rep(k, each = nrow(X)))^(1 / k))
-}
-models <- list(
-  exponential = list(fit  = function(X) rbind(rate = 1 / colMeans(as.matrix(X))),
-                     r    = function(m, p) rexp(m, p[1, ]),
-                     d    = function(x, p) dexp(x, p[1, ]),
-                     q    = function(pr, p) qexp(pr, p[1, ]),
-                     sf   = function(a, p) pexp(a, p[1, ], lower.tail = FALSE),
-                     mean = function(p) 1 / p[1, ], sd = function(p) 1 / p[1, ]),
-  gamma       = list(fit  = gamma_ml,
-                     r    = function(m, p) rgamma(m, p[1, ], p[2, ]),
-                     d    = function(x, p) dgamma(x, p[1, ], p[2, ]),
-                     q    = function(pr, p) qgamma(pr, p[1, ], p[2, ]),
-                     sf   = function(a, p) pgamma(a, p[1, ], p[2, ], lower.tail = FALSE),
-                     mean = function(p) p[1, ] / p[2, ], sd = function(p) sqrt(p[1, ]) / p[2, ]),
-  weibull     = list(fit  = weibull_ml,
-                     r    = function(m, p) rweibull(m, p[1, ], p[2, ]),
-                     d    = function(x, p) dweibull(x, p[1, ], p[2, ]),
-                     q    = function(pr, p) qweibull(pr, p[1, ], p[2, ]),
-                     sf   = function(a, p) pweibull(a, p[1, ], p[2, ], lower.tail = FALSE),
-                     mean = function(p) p[2, ] * gamma(1 + 1 / p[1, ]),
-                     sd   = function(p) p[2, ] * sqrt(gamma(1 + 2 / p[1, ]) - gamma(1 + 1 / p[1, ])^2)),
-  lognormal   = list(fit  = function(X) { L <- log(as.matrix(X)); m <- colMeans(L)
-  rbind(meanlog = m, sdlog = sqrt(colMeans(sweep(L, 2, m)^2))) },
-  r    = function(m, p) rlnorm(m, p[1, ], p[2, ]),
-  d    = function(x, p) dlnorm(x, p[1, ], p[2, ]),
-  q    = function(pr, p) qlnorm(pr, p[1, ], p[2, ]),
-  sf   = function(a, p) plnorm(a, p[1, ], p[2, ], lower.tail = FALSE),
-  mean = function(p) exp(p[1, ] + p[2, ]^2 / 2),
-  sd   = function(p) exp(p[1, ] + p[2, ]^2 / 2) * sqrt(exp(p[2, ]^2) - 1)))
-normal <- list(fit = function(X) rbind(mean = colMeans(as.matrix(X)), sd = col_sd(X)),
-               r   = function(m, p) rnorm(m, p[1, ], p[2, ]),
-               d   = function(x, p) dnorm(x, p[1, ], p[2, ]),
-               q   = function(pr, p) qnorm(pr, p[1, ], p[2, ]),
-               sf  = function(a, p) pnorm(a, p[1, ], p[2, ], lower.tail = FALSE))
+# The candidate models (exponential, gamma, Weibull, lognormal, and the normal as the Type 1
+# assumption) with their ML fits are in 20_boot_functions.R, shared with 30_mc_study.R.
 
 # The hospital quantities implied by fitted parameters (one column per parameter set).
 model_stats <- function(M, par) {
@@ -180,7 +125,7 @@ ks_model <- function(M, x) {
   X    <- boot_param(function(k) M$r(k, M$fit(x)), length(x), B)
   c(KS = obs, p_value = (1 + sum(apply(X, 2, stat) >= obs)) / (B + 1))
 }
-all_models <- c(models, normal = list(normal))
+all_models <- c(models, normal = list(normal_model))
 all_fits   <- lapply(all_models, function(M) M$fit(D))
 tab_gof    <- t(sapply(all_models, ks_model, x = D))
 
@@ -211,7 +156,7 @@ gap_stats <- function(X) {
 Istar    <- boot_iid(seq_len(nd), B)       # B resamples of the 21 days, one per column
 th_arr   <- c(day_stats(seq_len(nd))[, 1], p_work9 = p_day_over(D, N), gap_stats(G)[, 1])
 star_arr <- rbind(day_stats(Istar),
-                  p_work9 = sapply(seq_len(B), function(b) p_day_over(Dstar[, b], N[Istar[, b]])),
+                  p_work9 = p_day_over(Dstar, matrix(N[Istar], nd)),
                   gap_stats(boot_iid(G, B)))
 tab_arr  <- boot_table(th_arr, star_arr, alpha, bc = "p_work9")
 
