@@ -68,8 +68,8 @@ th <- dur_stats(D)[, 1]
 # 1. Non-parametric bootstrap: percentile-t for the mean and the shares over the slots,
 #    percentile for sd and quantiles. For q90 and q95 the main table below reports the
 #    smoothed interval of 2. instead. For the shares 30_mc_study.R found that Efron's
-#    percentile interval, used here before, under-covers P(scan > 60 min) slightly (92.8-94.9%
-#    at n = 209), while the percentile-t interval covers 95.5-98%.
+#    percentile interval, used here before, under-covers P(scan > 60 min) slightly (92.6-94.7%
+#    at n = 209), while the percentile-t interval covers 95.3-96.7%.
 Dstar   <- boot_iid(D, B)                 # kept: the 9-hour risk of the arrivals reuses them
 star_np <- dur_stats(Dstar)
 tab_np  <- boot_table(th, star_np, alpha)
@@ -107,10 +107,11 @@ rownames(tab_dur) <- NULL
 
 # Main table: the interval to report for each quantity. For q90 and q95 that is the smoothed
 # bootstrap. An EDF quantile is one order statistic, so its plain bootstrap distribution is
-# lumpy and too narrow: in 30_mc_study.R the plain percentile interval covers only 84-88% at
-# n = 209, and its upper limit falls below the true quantile 6-11% of the time instead of 2.5%,
-# which understates the slot length. The smoothed interval covers 92-96%. The estimate stays
-# the EDF quantile; the other quantities keep their non-parametric intervals.
+# lumpy and too narrow: in 30_mc_study.R the plain percentile interval covers only 84-87% at
+# n = 209, and its upper limit falls below the true quantile up to 11% of the time instead of
+# 2.5%, which understates the slot length. The smoothed interval covers 91-96%. The estimate
+# stays the EDF quantile; the other quantities keep their non-parametric intervals (for the sd
+# the smoothed interval would be slightly better: 93-96% against 92-95%).
 tab_main <- tab_np
 tab_main[q_names, ] <- tab_sm[q_names, ]
 tab_main$method <- ifelse(rownames(tab_main) %in% q_names, "smoothed", "non-parametric")
@@ -128,20 +129,32 @@ ks_model <- function(M, x) {
 all_models <- c(models, normal = list(normal_model))
 all_fits   <- lapply(all_models, function(M) M$fit(D))
 tab_gof    <- t(sapply(all_models, ks_model, x = D))
+# The fit test cannot choose the model. It rejects some models, but several usually pass (here
+# the gamma and the lognormal), and the one with the largest p-value is not thereby the truth.
+# A model's intervals are only right when that model is the truth: in 30_mc_study.R (tab35)
+# the interval for q95 from the gamma fit covers 82% of the time when the truth is lognormal
+# and 49% when it is Weibull, and the lognormal fit's covers 9% under a Weibull truth. So the
+# model rows of the durations table are a check on the main table, which assumes no model, and
+# not a replacement for it.
+not_rejected <- rownames(tab_gof)[tab_gof[, "p_value"] > alpha]
 
 # ---- Arrivals ------------------------------------------------------------------------------
 # Days are resampled whole, so a day's calls and scan-hours stay together; gaps are resampled
 # on their own (as in 10_type1.R). Names as in Type 1: lambda = calls per day, lambda_gaps =
 # calls per day from the gaps (9 / mean gap), hours = scan-hours per day, p_work9 = P(a day's
 # Type 2 scans take more than 9 h). dispersion (variance / mean) is 1 for Poisson counts,
-# gap_cv 1 for exponential gaps.
+# gap_cv 1 for exponential gaps. The dispersion interval is too narrow: from 21 days it covers
+# only 84-88% in 30_mc_study.R (tab31), its upper limit too low 11-15% of the time, so the
+# true dispersion may well be higher than its upper limit.
 # p_work9 means what it means for Type 1: a day's number of calls and its scan durations
 # combined (p_day_over() in 20_boot_functions.R), here with the observed daily counts and
 # durations in place of the Poisson and the normal. Its bootstrap pairs every resample of the
 # days with a resample of the durations (Dstar above). Its bootstrap distribution is skewed
-# and not centred on the estimate, so it gets the bias-corrected percentile interval: in
-# simulations with gamma, lognormal and Weibull durations Efron's interval (as in 10) put the
-# true risk above its upper limit 5-7% of the time instead of 2.5%.
+# and not centred on the estimate, so it gets the bias-corrected percentile interval. In
+# 30_mc_study.R (tab31) that covers 95% when the days are like August's (8 to 11 calls), where
+# Efron's interval (as in 10) covers 94.5%. When calls follow a renewal process with the Type 2
+# gap shape, both fall short (88% and 84-85%): days with 12 or more calls then carry most of
+# the risk, and 21 days rarely include one, which no resampling of those days can make up for.
 day_stats <- function(I) {
   I <- as.matrix(I); Nm <- matrix(N[I], nrow(I)); Hm <- matrix(H[I], nrow(I))
   sN <- col_sd(Nm); sH <- col_sd(Hm)
@@ -234,6 +247,8 @@ cat("\nML fits of the duration models:\n"); for (m in names(fits)) cat(sprintf("
 cat("\nScan durations, main table (minutes; smoothed intervals for q90 and q95):\n"); print(round_df(tab_main))
 cat("\nScan durations, every method (minutes; p_over = share of scans longer than the slot):\n"); print(round_df(tab_dur))
 cat("\nGoodness of fit of the durations (parametric-bootstrap KS test):\n"); print(round(tab_gof, 3))
+cat(sprintf("Not rejected at %.0f%%: %s. A model's intervals hold only when that model is the truth (30_mc_study.R,\ntab35), so the main table assumes none; the model rows are a check.\n",
+            100 * alpha, paste(not_rejected, collapse = ", ")))
 cat("\nTime between calls (working minutes): ML fits and KS test:\n")
 for (m in names(gap_fits)) cat(sprintf("  %-12s %s\n", m,
                                        paste(sprintf("%s = %.3f", rownames(gap_fits[[m]]), gap_fits[[m]][, 1]), collapse = ", ")))
