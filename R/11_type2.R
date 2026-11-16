@@ -42,13 +42,14 @@ p_names <- paste0("p_over_", slots)     # p_over_45, p_over_60: P(scan longer th
 rows    <- function(L) do.call(rbind, L)
 
 # ---- Scan durations ---------------------------------------------------------------------
-# Plug-in statistics for every column of X (one bootstrap sample per column).
+# Plug-in statistics for every column of X (one bootstrap sample per column), with the
+# standard errors that give the mean and the shares over the slots a percentile-t interval
+# (se_prop() in 20_boot_functions.R for the shares).
 dur_stats <- function(X) {
-  X <- as.matrix(X); s <- col_sd(X)
-  out <- rbind(mean = colMeans(X), se.mean = s / sqrt(nrow(X)), sd = s,
-               rows(lapply(probs, function(p) col_quantile(X, p))),
-               rows(lapply(slots, function(a) colMeans(X > a))))
-  rownames(out) <- c("mean", "se.mean", "sd", q_names, p_names)
+  X <- as.matrix(X); s <- col_sd(X); P <- rows(lapply(slots, function(a) colMeans(X > a)))
+  out <- rbind(colMeans(X), s / sqrt(nrow(X)), s, rows(lapply(probs, function(p) col_quantile(X, p))),
+               P, se_prop(P, nrow(X)))
+  rownames(out) <- c("mean", "se.mean", "sd", q_names, p_names, paste0("se.", p_names))
   out
 }
 # Candidate models for the durations. Each has an ML fit for every column of a matrix (one
@@ -119,12 +120,14 @@ model_stats <- function(M, par) {
 
 th <- dur_stats(D)[, 1]
 
-# 1. Non-parametric bootstrap: percentile-t for the mean, percentile for sd and quantiles,
-#    Efron's percentile for the tail probabilities (skewed, bounded by 0 and 1). For q90 and
-#    q95 the main table below reports the smoothed interval of 2. instead.
+# 1. Non-parametric bootstrap: percentile-t for the mean and the shares over the slots,
+#    percentile for sd and quantiles. For q90 and q95 the main table below reports the
+#    smoothed interval of 2. instead. For the shares 30_mc_study.R found that Efron's
+#    percentile interval, used here before, under-covers P(scan > 60 min) slightly (92.8-94.9%
+#    at n = 209), while the percentile-t interval covers 95.5-98%.
 Dstar   <- boot_iid(D, B)                 # kept: the 9-hour risk of the arrivals reuses them
 star_np <- dur_stats(Dstar)
-tab_np  <- boot_table(th, star_np, alpha, efron = p_names)
+tab_np  <- boot_table(th, star_np, alpha)
 
 # 2. Smoothed bootstrap. Its samples come from the EDF convolved with N(0, h^2), whose sd,
 #    quantiles and tail probabilities differ from the plug-in estimates. Shifting the
@@ -136,7 +139,7 @@ centre <- c(sd = sqrt(mean((D - mean(D))^2) + h^2),
             setNames(sapply(probs, function(p) kde_quantile(D, p, h)), q_names),
             setNames(sapply(slots, function(a) mean(pnorm((D - a) / h))), p_names))
 star_sm[names(centre), ] <- star_sm[names(centre), ] - (centre - th[names(centre)])
-tab_sm <- boot_table(th, star_sm, alpha, efron = p_names)
+tab_sm <- boot_table(th, star_sm, alpha)
 
 # 3. Parametric bootstraps, one per model: estimates are the model-implied quantities, and
 #    each bootstrap sample is simulated from the fit and refitted by ML. If a model is right,
