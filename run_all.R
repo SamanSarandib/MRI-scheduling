@@ -4,8 +4,8 @@
 
 scripts <- c("R/00_load_clean.R",   # data, checks, working-hour clock, daily aggregates
              "R/01_eda.R",          # data section: summary table and figures
-             "R/10_type1.R")        # Type 1: estimates, parametric and nonparametric bootstrap
-
+             "R/10_type1.R",        # Type 1: estimates, parametric and nonparametric bootstrap
+             "R/11_type2.R")        # Type 2: estimates, nonparametric bootstrap and parametric bootstrap
 for (f in scripts) {
   cat("\n=====", f, "=====\n")
   source(f)
