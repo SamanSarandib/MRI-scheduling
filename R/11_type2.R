@@ -6,12 +6,16 @@
 #   - smoothed:       resample and add N(0, h^2) noise (boot_smooth), centred on the KDE
 #   - parametric:     for each candidate model (exponential, gamma, Weibull, lognormal),
 #                     simulate from its ML fit and refit every sample (boot_param)
-# Arrivals (calls and scan-hours per day, gaps between calls) get the non-parametric bootstrap.
+# Arrivals (calls and scan-hours per day, gaps between calls) get the non-parametric bootstrap,
+# and shares of the 21 observed days an exact binomial interval.
 # A parametric-bootstrap KS test checks which of these models (and the normal) fits, both for the
 # durations and for the time between calls; the gaps also get a non-parametric and a parametric
 # bootstrap per model.
-# Names follow 10_type1.R (lambda, lambda_gaps, hours, p_work9, p_over_<slot>).
-# Output: output/tab11_type2_{durations,arrivals,gaps,gof,gof_gaps}.csv, output/fig12_type2_bootstrap.pdf,
+# Names follow 10_type1.R (lambda, lambda_gaps, hours, p_work9, p_over_<slot>); share_days_<event>
+# is the share of the 21 observed days with that event.
+# The main table (tab11_type2_main.csv) holds the interval to report for each duration quantity:
+# the smoothed one for q90 and q95, which the plain EDF interval under-covers (30_mc_study.R).
+# Output: output/tab11_type2_{main,durations,arrivals,gaps,gof,gof_gaps}.csv, output/fig12_type2_bootstrap.pdf,
 # fig13-14 (durations) and fig15-16 (time between calls): histograms and QQ plots of the fitted
 # models, as fig11 for Type 1; figures are also drawn in RStudio's Plots pane.
 # output/type2.rds, and `type2_inputs` (generators in minutes) for the simulation in Part 2.
@@ -38,64 +42,18 @@ p_names <- paste0("p_over_", slots)     # p_over_45, p_over_60: P(scan longer th
 rows    <- function(L) do.call(rbind, L)
 
 # ---- Scan durations ---------------------------------------------------------------------
-# Plug-in statistics for every column of X (one bootstrap sample per column).
+# Plug-in statistics for every column of X (one bootstrap sample per column), with the
+# standard errors that give the mean and the shares over the slots a percentile-t interval
+# (se_prop() in 20_boot_functions.R for the shares).
 dur_stats <- function(X) {
-  X <- as.matrix(X); s <- col_sd(X)
-  out <- rbind(mean = colMeans(X), se.mean = s / sqrt(nrow(X)), sd = s,
-               rows(lapply(probs, function(p) col_quantile(X, p))),
-               rows(lapply(slots, function(a) colMeans(X > a))))
-  rownames(out) <- c("mean", "se.mean", "sd", q_names, p_names)
+  X <- as.matrix(X); s <- col_sd(X); P <- rows(lapply(slots, function(a) colMeans(X > a)))
+  out <- rbind(colMeans(X), s / sqrt(nrow(X)), s, rows(lapply(probs, function(p) col_quantile(X, p))),
+               P, se_prop(P, nrow(X)))
+  rownames(out) <- c("mean", "se.mean", "sd", q_names, p_names, paste0("se.", p_names))
   out
 }
-# Candidate models for the durations. Each has an ML fit for every column of a matrix (one
-# parameter column per sample), a random generator, quantile and survival functions, and its
-# mean and sd. Exponential and lognormal ML are closed form, the gamma uses gamma_ml from
-# 20_boot_functions.R and the Weibull weibull_ml below (kept here, not in the shared file 20).
-# The normal is included only in the fit test, as the Type 1 assumption.
-# Weibull ML: the shape k solves 1/k + mean(log x) - sum(x^k log x) / sum(x^k) = 0 (Newton from
-# the usual CV-based start), then scale = mean(x^k)^(1/k); it matches MASS::fitdistr.
-weibull_ml <- function(X) {
-  X <- as.matrix(X); L <- log(X); mL <- colMeans(L)
-  k <- (col_sd(X) / colMeans(X))^-1.086
-  for (i in 1:20) {
-    Xk <- X^rep(k, each = nrow(X)); S0 <- colSums(Xk); S1 <- colSums(Xk * L); S2 <- colSums(Xk * L^2)
-    k <- k - (1 / k + mL - S1 / S0) / (-1 / k^2 - (S2 / S0 - (S1 / S0)^2))
-  }
-  rbind(shape = k, scale = colMeans(X^rep(k, each = nrow(X)))^(1 / k))
-}
-models <- list(
-  exponential = list(fit  = function(X) rbind(rate = 1 / colMeans(as.matrix(X))),
-                     r    = function(m, p) rexp(m, p[1, ]),
-                     d    = function(x, p) dexp(x, p[1, ]),
-                     q    = function(pr, p) qexp(pr, p[1, ]),
-                     sf   = function(a, p) pexp(a, p[1, ], lower.tail = FALSE),
-                     mean = function(p) 1 / p[1, ], sd = function(p) 1 / p[1, ]),
-  gamma       = list(fit  = gamma_ml,
-                     r    = function(m, p) rgamma(m, p[1, ], p[2, ]),
-                     d    = function(x, p) dgamma(x, p[1, ], p[2, ]),
-                     q    = function(pr, p) qgamma(pr, p[1, ], p[2, ]),
-                     sf   = function(a, p) pgamma(a, p[1, ], p[2, ], lower.tail = FALSE),
-                     mean = function(p) p[1, ] / p[2, ], sd = function(p) sqrt(p[1, ]) / p[2, ]),
-  weibull     = list(fit  = weibull_ml,
-                     r    = function(m, p) rweibull(m, p[1, ], p[2, ]),
-                     d    = function(x, p) dweibull(x, p[1, ], p[2, ]),
-                     q    = function(pr, p) qweibull(pr, p[1, ], p[2, ]),
-                     sf   = function(a, p) pweibull(a, p[1, ], p[2, ], lower.tail = FALSE),
-                     mean = function(p) p[2, ] * gamma(1 + 1 / p[1, ]),
-                     sd   = function(p) p[2, ] * sqrt(gamma(1 + 2 / p[1, ]) - gamma(1 + 1 / p[1, ])^2)),
-  lognormal   = list(fit  = function(X) { L <- log(as.matrix(X)); m <- colMeans(L)
-  rbind(meanlog = m, sdlog = sqrt(colMeans(sweep(L, 2, m)^2))) },
-  r    = function(m, p) rlnorm(m, p[1, ], p[2, ]),
-  d    = function(x, p) dlnorm(x, p[1, ], p[2, ]),
-  q    = function(pr, p) qlnorm(pr, p[1, ], p[2, ]),
-  sf   = function(a, p) plnorm(a, p[1, ], p[2, ], lower.tail = FALSE),
-  mean = function(p) exp(p[1, ] + p[2, ]^2 / 2),
-  sd   = function(p) exp(p[1, ] + p[2, ]^2 / 2) * sqrt(exp(p[2, ]^2) - 1)))
-normal <- list(fit = function(X) rbind(mean = colMeans(as.matrix(X)), sd = col_sd(X)),
-               r   = function(m, p) rnorm(m, p[1, ], p[2, ]),
-               d   = function(x, p) dnorm(x, p[1, ], p[2, ]),
-               q   = function(pr, p) qnorm(pr, p[1, ], p[2, ]),
-               sf  = function(a, p) pnorm(a, p[1, ], p[2, ], lower.tail = FALSE))
+# The candidate models (exponential, gamma, Weibull, lognormal, and the normal as the Type 1
+# assumption) with their ML fits are in 20_boot_functions.R, shared with 30_mc_study.R.
 
 # The hospital quantities implied by fitted parameters (one column per parameter set).
 model_stats <- function(M, par) {
@@ -107,10 +65,14 @@ model_stats <- function(M, par) {
 
 th <- dur_stats(D)[, 1]
 
-# 1. Non-parametric bootstrap: percentile-t for the mean, percentile for sd and quantiles,
-#    Efron's percentile for the tail probabilities (skewed, bounded by 0 and 1).
-star_np <- dur_stats(boot_iid(D, B))
-tab_np  <- boot_table(th, star_np, alpha, efron = p_names)
+# 1. Non-parametric bootstrap: percentile-t for the mean and the shares over the slots,
+#    percentile for sd and quantiles. For q90 and q95 the main table below reports the
+#    smoothed interval of 2. instead. For the shares 30_mc_study.R found that Efron's
+#    percentile interval, used here before, under-covers P(scan > 60 min) slightly (92.6-94.7%
+#    at n = 209), while the percentile-t interval covers 95.3-96.7%.
+Dstar   <- boot_iid(D, B)                 # kept: the 9-hour risk of the arrivals reuses them
+star_np <- dur_stats(Dstar)
+tab_np  <- boot_table(th, star_np, alpha)
 
 # 2. Smoothed bootstrap. Its samples come from the EDF convolved with N(0, h^2), whose sd,
 #    quantiles and tail probabilities differ from the plug-in estimates. Shifting the
@@ -122,7 +84,7 @@ centre <- c(sd = sqrt(mean((D - mean(D))^2) + h^2),
             setNames(sapply(probs, function(p) kde_quantile(D, p, h)), q_names),
             setNames(sapply(slots, function(a) mean(pnorm((D - a) / h))), p_names))
 star_sm[names(centre), ] <- star_sm[names(centre), ] - (centre - th[names(centre)])
-tab_sm <- boot_table(th, star_sm, alpha, efron = p_names)
+tab_sm <- boot_table(th, star_sm, alpha)
 
 # 3. Parametric bootstraps, one per model: estimates are the model-implied quantities, and
 #    each bootstrap sample is simulated from the fit and refitted by ML. If a model is right,
@@ -143,6 +105,17 @@ tab_dur <- do.call(rbind, c(list(long(tab_np, "non-parametric"), long(tab_sm, "s
 tab_dur <- tab_dur[order(match(tab_dur$quantity, rownames(tab_np))), ]
 rownames(tab_dur) <- NULL
 
+# Main table: the interval to report for each quantity. For q90 and q95 that is the smoothed
+# bootstrap. An EDF quantile is one order statistic, so its plain bootstrap distribution is
+# lumpy and too narrow: in 30_mc_study.R the plain percentile interval covers only 84-87% at
+# n = 209, and its upper limit falls below the true quantile up to 11% of the time instead of
+# 2.5%, which understates the slot length. The smoothed interval covers 91-96%. The estimate
+# stays the EDF quantile; the other quantities keep their non-parametric intervals (for the sd
+# the smoothed interval would be slightly better: 93-96% against 92-95%).
+tab_main <- tab_np
+tab_main[q_names, ] <- tab_sm[q_names, ]
+tab_main$method <- ifelse(rownames(tab_main) %in% q_names, "smoothed", "non-parametric")
+
 # ---- Goodness of fit: KS distance to each fitted model ------------------------------------
 # The parameters are estimated, so the standard KS p-value is wrong (too large); the null
 # distribution comes from a parametric bootstrap that refits the parameters on every sample.
@@ -153,32 +126,65 @@ ks_model <- function(M, x) {
   X    <- boot_param(function(k) M$r(k, M$fit(x)), length(x), B)
   c(KS = obs, p_value = (1 + sum(apply(X, 2, stat) >= obs)) / (B + 1))
 }
-all_models <- c(models, normal = list(normal))
+all_models <- c(models, normal = list(normal_model))
 all_fits   <- lapply(all_models, function(M) M$fit(D))
 tab_gof    <- t(sapply(all_models, ks_model, x = D))
+# The fit test cannot choose the model. It rejects some models, but several usually pass (here
+# the gamma and the lognormal), and the one with the largest p-value is not thereby the truth.
+# A model's intervals are only right when that model is the truth: in 30_mc_study.R (tab35)
+# the interval for q95 from the gamma fit covers 82% of the time when the truth is lognormal
+# and 49% when it is Weibull, and the lognormal fit's covers 9% under a Weibull truth. So the
+# model rows of the durations table are a check on the main table, which assumes no model, and
+# not a replacement for it.
+not_rejected <- rownames(tab_gof)[tab_gof[, "p_value"] > alpha]
 
 # ---- Arrivals ------------------------------------------------------------------------------
 # Days are resampled whole, so a day's calls and scan-hours stay together; gaps are resampled
 # on their own (as in 10_type1.R). Names as in Type 1: lambda = calls per day, lambda_gaps =
 # calls per day from the gaps (9 / mean gap), hours = scan-hours per day, p_work9 = P(a day's
-# Type 2 scans take more than 9 h). Without a model these are plug-in: p_work9 is the share of
-# such days. dispersion (variance / mean) is 1 for Poisson counts, gap_cv 1 for exponential
-# gaps. p_calls_over_<cap>: the chance a day has more calls than one machine has 45- or 60-minute slots.
+# Type 2 scans take more than 9 h). dispersion (variance / mean) is 1 for Poisson counts,
+# gap_cv 1 for exponential gaps. The dispersion interval is too narrow: from 21 days it covers
+# only 84-88% in 30_mc_study.R (tab31), its upper limit too low 11-15% of the time, so the
+# true dispersion may well be higher than its upper limit.
+# p_work9 means what it means for Type 1: a day's number of calls and its scan durations
+# combined (p_day_over() in 20_boot_functions.R), here with the observed daily counts and
+# durations in place of the Poisson and the normal. Its bootstrap pairs every resample of the
+# days with a resample of the durations (Dstar above). Its bootstrap distribution is skewed
+# and not centred on the estimate, so it gets the bias-corrected percentile interval. In
+# 30_mc_study.R (tab31) that covers 95% when the days are like August's (8 to 11 calls), where
+# Efron's interval (as in 10) covers 94.5%. When calls follow a renewal process with the Type 2
+# gap shape, both fall short (88% and 84-85%): days with 12 or more calls then carry most of
+# the risk, and 21 days rarely include one, which no resampling of those days can make up for.
 day_stats <- function(I) {
   I <- as.matrix(I); Nm <- matrix(N[I], nrow(I)); Hm <- matrix(H[I], nrow(I))
   sN <- col_sd(Nm); sH <- col_sd(Hm)
-  out <- rbind(colMeans(Nm), sN^2 / colMeans(Nm), rows(lapply(cap, function(c) colMeans(Nm > c))),
-               colMeans(Hm), colMeans(Hm > 9), sN / sqrt(nrow(I)), sH / sqrt(nrow(I)))
-  rownames(out) <- c("lambda", "dispersion", paste0("p_calls_over_", cap), "hours", "p_work9", "se.lambda", "se.hours")
+  out <- rbind(colMeans(Nm), sN^2 / colMeans(Nm), colMeans(Hm), sN / sqrt(nrow(I)), sH / sqrt(nrow(I)))
+  rownames(out) <- c("lambda", "dispersion", "hours", "se.lambda", "se.hours")
   out
 }
 gap_stats <- function(X) {
   X <- as.matrix(X); m <- colMeans(X); cv <- col_sd(X) / m
   rbind(lambda_gaps = 9 / m, gap_cv = cv, se.lambda_gaps = 9 / m * cv / sqrt(nrow(X)))   # delta method
 }
-th_arr   <- c(day_stats(seq_len(nd))[, 1], gap_stats(G)[, 1])
-star_arr <- rbind(day_stats(boot_iid(seq_len(nd), B)), gap_stats(boot_iid(G, B)))
-tab_arr  <- boot_table(th_arr, star_arr, alpha, efron = c(paste0("p_calls_over_", cap), "p_work9"))
+Istar    <- boot_iid(seq_len(nd), B)       # B resamples of the 21 days, one per column
+th_arr   <- c(day_stats(seq_len(nd))[, 1], p_work9 = p_day_over(D, N), gap_stats(G)[, 1])
+star_arr <- rbind(day_stats(Istar),
+                  p_work9 = p_day_over(Dstar, matrix(N[Istar], nd)),
+                  gap_stats(boot_iid(G, B)))
+tab_arr  <- boot_table(th_arr, star_arr, alpha, bc = "p_work9")
+
+# Shares of the 21 observed days with an event, named share_days_<event>: more calls than one
+# machine has 45- or 60-minute slots (12 and 9), and more than 9 scan-hours. The days are
+# independent trials, so the interval is the exact (Clopper-Pearson) binomial one. A bootstrap
+# of the days cannot do this: when no day had the event it gives the interval [0, 0], which
+# reads as no risk with certainty, while 0 days out of 21 still allows a chance of up to 16%.
+day_events <- c(setNames(lapply(cap, function(c) N > c), paste0("share_days_calls_over_", cap)),
+                list(share_days_work9 = H > 9))
+tab_days <- do.call(rbind, lapply(names(day_events), function(e) {
+  x <- sum(day_events[[e]]); ci <- binom.test(x, nd, conf.level = 1 - alpha)$conf.int
+  data.frame(estimate = x / nd, lower = ci[1], upper = ci[2], interval = "exact binomial", row.names = e)
+}))
+tab_arr <- rbind(tab_arr, tab_days)
 
 # Time between calls: the same four models as for the durations, fitted by ML to the gaps in
 # working minutes, with the KS test (figures 15 and 16 show the fit). Exponential gaps mean
@@ -238,8 +244,11 @@ round_df <- function(d) { num <- sapply(d, is.numeric); d[num] <- lapply(d[num],
 cat(sprintf("Type 2: %d scans, %.1f calls per day; bandwidth h = %.2f min.\n", n, mean(N), h))
 cat("\nML fits of the duration models:\n"); for (m in names(fits)) cat(sprintf("  %-12s %s\n", m,
                                                                                paste(sprintf("%s = %.3f", rownames(fits[[m]]), fits[[m]][, 1]), collapse = ", ")))
-cat("\nScan durations (minutes; p_over = share of scans longer than the slot):\n"); print(round_df(tab_dur))
+cat("\nScan durations, main table (minutes; smoothed intervals for q90 and q95):\n"); print(round_df(tab_main))
+cat("\nScan durations, every method (minutes; p_over = share of scans longer than the slot):\n"); print(round_df(tab_dur))
 cat("\nGoodness of fit of the durations (parametric-bootstrap KS test):\n"); print(round(tab_gof, 3))
+cat(sprintf("Not rejected at %.0f%%: %s. A model's intervals hold only when that model is the truth (30_mc_study.R,\ntab35), so the main table assumes none; the model rows are a check.\n",
+            100 * alpha, paste(not_rejected, collapse = ", ")))
 cat("\nTime between calls (working minutes): ML fits and KS test:\n")
 for (m in names(gap_fits)) cat(sprintf("  %-12s %s\n", m,
                                        paste(sprintf("%s = %.3f", rownames(gap_fits[[m]]), gap_fits[[m]][, 1]), collapse = ", ")))
@@ -248,6 +257,7 @@ cat("\nTime between calls: mean gap (working minutes), CV and calls per day, per
 cat("\nArrivals (per working day; lambda_gaps from the gaps between calls):\n"); print(round_df(tab_arr))
 cat("\nBusy-day range (calls per day):\n"); print(busy)
 cat("\nDiagnostics:\n"); print(round(diagnostics, 3))
+write.csv(round_df(tab_main), "output/tab11_type2_main.csv")
 write.csv(round_df(tab_dur), "output/tab11_type2_durations.csv", row.names = FALSE)
 write.csv(round_df(tab_arr), "output/tab11_type2_arrivals.csv")
 write.csv(round(tab_gof, 3), "output/tab11_type2_gof.csv")
@@ -337,7 +347,7 @@ type2_inputs <- local({
              paste0("gap2_", names(ms))))
 })
 
-saveRDS(list(estimates = th, durations = tab_dur, arrivals = tab_arr, gof = tab_gof, gof_gaps = tab_gof_gaps,
+saveRDS(list(estimates = th, main = tab_main, durations = tab_dur, arrivals = tab_arr, gof = tab_gof, gof_gaps = tab_gof_gaps,
              gap_fits = lapply(gap_fits, function(p) p[, 1]), gaps = tab_gaps,
              gap_par_star = lapply(gap_par_star, t), busy_day = busy,
              diagnostics = diagnostics, np_star = star_np, sm_star = star_sm, arr_star = star_arr,

@@ -64,17 +64,22 @@ print(busy)
 
 # Diagnostics: dispersion test of the daily counts (chi-square, 20 df), lag-1 autocorrelations
 # in call order, Shapiro-Wilk, and the observed overrun shares next to the normal ones.
+# Two checks of the model's p_work9, named as in 11_type2.R so that the types compare like
+# for like: p_work9_observed combines the observed daily counts and durations (p_day_over(),
+# the estimator 11 uses for Type 2), and share_days_work9 is the share of the 21 days with
+# more than 9 scan-hours.
 X2 <- sum((N - mean(N))^2) / mean(N)
 diagnostics <- c(dispersion_X2 = X2, p_over_dispersed = pchisq(X2, length(N) - 1, lower.tail = FALSE),
                  p_under_dispersed = pchisq(X2, length(N) - 1),
                  acf1_durations = acf(D, plot = FALSE)$acf[2], acf1_gaps = acf(G, plot = FALSE)$acf[2],
                  shapiro_p = shapiro.test(D)$p.value,
-                 setNames(sapply(slots, function(s) mean(D > s)), paste0("observed_over_", slots)))
+                 setNames(sapply(slots, function(s) mean(D > s)), paste0("observed_over_", slots)),
+                 p_work9_observed = p_day_over(D, N), share_days_work9 = mean(daily$hours1 > 9))
 print(round(diagnostics, 3))
 
 # Figure 10: durations with the fitted normal and the candidate slots (the report figure).
 pdf("output/fig10_type1_durations.pdf", width = 7, height = 4)
-h <- hist(D, breaks = seq(0, 50, 2.5), plot = FALSE)
+h <- hist(D, breaks = seq(0, max(50, 2.5 * ceiling(max(D) / 2.5)), 2.5), plot = FALSE)   # 0-50, wider if needed
 plot(h, ylim = c(0, 1.1 * max(h$counts, 2.5 * length(D) * dnorm(0, 0, th[["sigma"]]))), col = "grey70",
      border = "white", main = "Type 1 scan durations", xlab = "Minutes", ylab = "Scans per bin")
 curve(2.5 * length(D) * dnorm(x, th[["mu"]], th[["sigma"]]), add = TRUE, lwd = 2)
@@ -89,9 +94,10 @@ par(mfrow = c(1, 3), mar = c(4, 4, 2, 1))
 qqnorm(D, main = "Durations: normal QQ", pch = 16, cex = 0.5); qqline(D)
 qqplot(qexp(ppoints(length(G)), th[["lambda_gaps"]] / 9), G, main = "Gaps: exponential QQ", pch = 16, cex = 0.5,
        xlab = "Theoretical quantiles (h)", ylab = "Sample quantiles (h)"); abline(0, 1)
-plot(table(factor(N, levels = 5:30)) / length(N), ylab = "Share of days", xlab = "Calls per day",
+kk <- min(5, N):max(30, N)                                        # 5-30 calls, wider if needed
+plot(table(factor(N, levels = kk)) / length(N), ylab = "Share of days", xlab = "Calls per day",
      main = "Daily counts vs Poisson")
-points(5:30, dpois(5:30, th[["lambda"]]), pch = 16, col = "steelblue4")
+points(kk, dpois(kk, th[["lambda"]]), pch = 16, col = "steelblue4")
 invisible(dev.off())
 
 # Hand-over to Part 2 in the plan's format: minutes, gaps on the working-minute clock (540 a
